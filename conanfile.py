@@ -28,8 +28,8 @@ class AndroidToolchain(ConanFile):
     description = "Android NDK"
     url = "https://github.com/MX-Dev/conan-android-ndk"
     settings = "os", "arch", "compiler", "build_type"
-    options = {"libcxx": ["static", "shared"], "arm_mode": ["thumb", "arm"], "neon": [True, False], "ndk_path": "ANY"}
-    default_options = "libcxx=shared", "arm_mode=arm", "neon=True", "ndk_path=False"
+    options = {"libcxx": ["static", "shared"], "arm_mode": ["thumb", "arm"], "neon": [True, False]}
+    default_options = "libcxx=shared", "arm_mode=arm", "neon=True"
     requires = 'ninja_installer/1.8.2@bincrafters/stable'
     exports_sources = "android-toolchain.cmake"
     short_paths = True
@@ -123,22 +123,6 @@ class AndroidToolchain(ConanFile):
             raise Exception("Arch %s is not supported" % self.settings.arch)
 
     def build(self):
-        if self.options.ndk_path:
-            if os.path.exists(str(self.options.ndk_path)):
-                return
-
-        env_path = os.getenv("ANDROID_NDK")
-        if env_path:
-            if os.path.exists(env_path):
-                self.options.ndk_path = env_path
-                return
-
-        env_path = os.getenv("ANDROID_NDK_HOME")
-        if env_path:
-            if os.path.exists(env_path):
-                self.options.ndk_path = env_path
-                return
-
         urls = {"Windows_AMD64": [
             "https://dl.google.com/android/repository/android-ndk-%s-windows-x86_64.zip" % self.version,
             "37906e8e79a9dddf6805325f706a072055e4136c"],
@@ -161,16 +145,14 @@ class AndroidToolchain(ConanFile):
         os.unlink("ndk.zip")
 
     def package(self):
-        if not self.options.ndk_path:
-            files_to_exclude = ["any", "chrono", "numeric", "optional", "ratio", "string_view", "system_error", "tuple"]
-            exclude_list = ["*/experimental/%s" % f for f in files_to_exclude]
-            self.copy("*", dst="", src=self.zip_folder, keep_path=True, symlinks=True, excludes=exclude_list)
-            self.options.ndk_path = posixpath.join(self.package_folder, self.zip_folder)
+        files_to_exclude = ["any", "chrono", "numeric", "optional", "ratio", "string_view", "system_error", "tuple"]
+        exclude_list = ["*/experimental/%s" % f for f in files_to_exclude]
+        self.copy("*", dst="", src=self.zip_folder, keep_path=True, symlinks=True, excludes=exclude_list)
         self.copy("android-toolchain.cmake")
 
     def package_info(self):
         android_platform = "android-%s" % self.settings.os.api_level
-        ndk_root = posixpath.join(*str(self.options.ndk_path).split('\\'))
+        ndk_root = self.posix_package_folder
         platform_path = posixpath.join(ndk_root, "platforms", android_platform, "arch-%s" % self.sysroot_abi)
         # This cannot be considered to be the "real" sysroot, since arch-specific files are in a subfolder
         sysroot_path = posixpath.join(ndk_root, "sysroot")
@@ -179,9 +161,7 @@ class AndroidToolchain(ConanFile):
         toolchain_root_path = posixpath.join(ndk_root, "toolchains", "%s-4.9" % self.toolchain_triple,
                                              "prebuilt", self.host)
 
-        llvm_toolchain_prefix = posixpath.join(ndk_root, "toolchains", "llvm", "prebuilt", self.host,
-                                               "bin")
-        toolchain_prefix = posixpath.join(toolchain_root_path, "bin", "%s-" % self.toolchain_name)
+        llvm_toolchain_prefix = posixpath.join(ndk_root, "toolchains", "llvm", "prebuilt", self.host, "bin")
 
         # All those flags are taken from the NDK's android.toolchain.cmake file.
         # Set C library headers at the end of search path, otherwise #include_next will fail in C++ STL
