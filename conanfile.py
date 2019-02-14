@@ -1,6 +1,8 @@
-from conans import ConanFile, tools
-import posixpath
 import os
+import posixpath
+import platform
+
+from conans import ConanFile, tools
 
 ANDROID_ABIS = {"x86": "x86",
                 "x86_64": "x86_64",
@@ -17,15 +19,18 @@ TRIPLE_ABIS = {"x86": "i686",
                "armv7": "arm",
                "armv8": "aarch64"}
 
+
+# noinspection PyUnresolvedReferences
 class AndroidNDKConan(ConanFile):
     name = "android-ndk"
-    version = "r18"
+    version = "r19"
     license = "APACHE2"
     description = "Android NDK"
-    url = "https://github.com/theodelrieu/conan-android-ndk"
-    settings = "os_build", "arch_build", "os", "arch", "compiler", "build_type"
-    options = { "libcxx": ["static", "shared"], "arm_mode": ["thumb", "arm"], "neon": [True, False] }
-    default_options = "libcxx=static", "arm_mode=thumb", "neon=True"
+    url = "https://github.com/MX-Dev/conan-android-ndk"
+    settings = "os", "arch", "compiler", "build_type"
+    options = {"libcxx": ["static", "shared"], "arm_mode": ["thumb", "arm"], "neon": [True, False]}
+    default_options = "libcxx=shared", "arm_mode=thumb", "neon=True"
+    requires = 'ninja_installer/1.8.2@bincrafters/stable'
     exports_sources = "android-toolchain.cmake"
     short_paths = True
     no_copy_source = True
@@ -44,11 +49,11 @@ class AndroidNDKConan(ConanFile):
 
     @property
     def host(self):
-        if self.settings.os_build == "Windows":
-            if self.settings.arch_build == "x86_64":
+        if platform.system() == "Windows":
+            if platform.machine() == "AMD64":
                 return "windows-x86_64"
             return "windows"
-        elif self.settings.os_build == "Macos":
+        elif platform.system() == "Darwin":
             return "darwin-x86_64"
         return "linux-x86_64"
 
@@ -105,30 +110,34 @@ class AndroidNDKConan(ConanFile):
             raise Exception("64-bit platforms require API level 21+")
         if self.settings.compiler != "clang":
             raise Exception("clang is the only supported compiler")
-        if self.settings.compiler.version != "7.0":
-            raise Exception("clang 7.0 required")
-        if self.settings.os_build not in ["Linux", "Macos", "Windows"]:
+        if self.settings.compiler.version != "8":
+            raise Exception("clang 8.0 required")
+        if platform.system() not in ["Linux", "Macos", "Windows"]:
             raise Exception("Unsupported build machine OS")
-        if self.settings.arch_build != "x86_64":
-            if self.settings.os_build != "Windows" or self.settings.arch_build != "x86":
+        if platform.machine() not in ["x86_64", "AMD64"]:
+            if platform.system() != "Windows" or platform.machine() != "x86":
                 raise Exception("Unsupported build machine architecture")
         if self.settings.os != "Android":
             raise Exception("self.settings.os must be Android")
         if self.settings.arch not in ["armv7", "armv8", "x86", "x86_64"]:
             raise Exception("Arch %s is not supported" % self.settings.arch)
 
-    def source(self):
-        urls = {"Windows_x86_64": ["https://dl.google.com/android/repository/android-ndk-%s-windows-x86_64.zip" % self.version,
-                                   "7fc0e0f94d86ea389bd18761abdc1bae2c005587"],
-                "Windows_x86": ["https://dl.google.com/android/repository/android-ndk-%s-windows-x86.zip" % self.version,
-                                "c3422e060b3ea955516e86737bf4237b8482d59a"],
-                "Macos_x86_64": ["https://dl.google.com/android/repository/android-ndk-%s-darwin-x86_64.zip" % self.version,
-                                 "2070c9a5799671e34b88d383a93af255a5ea260d"],
-                "Linux_x86_64": ["https://dl.google.com/android/repository/android-ndk-%s-linux-x86_64.zip" % self.version,
-                                 "2ac2e8e1ef73ed551cac3a1479bb28bd49369212"]
+    def build(self):
+        urls = {"Windows_AMD64": [
+            "https://dl.google.com/android/repository/android-ndk-%s-windows-x86_64.zip" % self.version,
+            "37906e8e79a9dddf6805325f706a072055e4136c"],
+            "Windows_x86": [
+                "https://dl.google.com/android/repository/android-ndk-%s-windows-x86.zip" % self.version,
+                "281175a42b312d630f864a02a31c5806ada5663b"],
+            "Macos_x86_64": [
+                "https://dl.google.com/android/repository/android-ndk-%s-darwin-x86_64.zip" % self.version,
+                "86c1a962601b23b8a6d3d535c93b4b0bc4f29249"],
+            "Linux_x86_64": [
+                "https://dl.google.com/android/repository/android-ndk-%s-linux-x86_64.zip" % self.version,
+                "f02ad84cb5b6e1ff3eea9e6168037c823408c8ac"]
         }
 
-        url, sha1 = urls.get("%s_%s" % (self.settings.os_build, self.settings.arch_build))
+        url, sha1 = urls.get("%s_%s" % (platform.system(), platform.machine()))
 
         tools.download(url, "ndk.zip")
         tools.check_sha1("ndk.zip", sha1)
@@ -137,8 +146,8 @@ class AndroidNDKConan(ConanFile):
 
     def package(self):
         # some STL headers in experimental/ simply contain an #error
-        # This can cause invalid feature detection (via __has_include or similar, e.g. Boost.Asio tries to use experimental/string_view)
-        # Therefore, do not copy those files
+        # This can cause invalid feature detection (via has_include or similar,
+        # e.g. Boost.Asio tries to use experimental/string_view). Therefore, do not copy those files
         files_to_exclude = ["any", "chrono", "numeric", "optional", "ratio", "string_view", "system_error", "tuple"]
         exclude_list = ["*/experimental/%s" % f for f in files_to_exclude]
 
@@ -147,33 +156,38 @@ class AndroidNDKConan(ConanFile):
 
     def package_info(self):
         android_platform = "android-%s" % self.settings.os.api_level
-        platform_path = posixpath.join(self.posix_package_folder, "platforms", android_platform, "arch-%s" % self.sysroot_abi)
+        platform_path = posixpath.join(self.posix_package_folder, "platforms", android_platform,
+                                       "arch-%s" % self.sysroot_abi)
         # This cannot be considered to be the "real" sysroot, since arch-specific files are in a subfolder
         sysroot_path = posixpath.join(self.posix_package_folder, "sysroot")
         stl_path = posixpath.join(self.posix_package_folder, "sources", "cxx-stl", "llvm-libc++")
         stl_abi_path = posixpath.join(self.posix_package_folder, "sources", "cxx-stl", "llvm-libc++abi")
-        toolchain_root_path = posixpath.join(self.posix_package_folder, "toolchains", "%s-4.9" % self.toolchain_triple, "prebuilt", self.host)
+        toolchain_root_path = posixpath.join(self.posix_package_folder, "toolchains", "%s-4.9" % self.toolchain_triple,
+                                             "prebuilt", self.host)
 
-        llvm_toolchain_prefix = posixpath.join(self.posix_package_folder, "toolchains", "llvm", "prebuilt", self.host, "bin")
+        llvm_toolchain_prefix = posixpath.join(self.posix_package_folder, "toolchains", "llvm", "prebuilt", self.host,
+                                               "bin")
         toolchain_prefix = posixpath.join(toolchain_root_path, "bin", "%s-" % self.toolchain_name)
 
         # All those flags are taken from the NDK's android.toolchain.cmake file.
         # Set C library headers at the end of search path, otherwise #include_next will fail in C++ STL
-        compiler_flags = ["-isystem%s" % posixpath.join(stl_abi_path, "include")]
-        compiler_flags.append("-isystem%s" % posixpath.join(stl_path, "include"))
+        compiler_flags = ["-isystem%s" % posixpath.join(stl_abi_path, "include"),
+                          "-isystem%s" % posixpath.join(stl_path, "include"),
+                          "-isystem%s" % posixpath.join(sysroot_path, "usr", "include", self.header_triple)]
         # Find asm files
-        compiler_flags.append("-isystem%s" % posixpath.join(sysroot_path, "usr", "include", self.header_triple))
         target = self.llvm_triple
         compiler_flags.append("--target=%s" % target)
         compiler_flags.append("--sysroot=%s" % sysroot_path)
-        compiler_flags.extend(["-g", "-DANDROID", "-ffunction-sections", "-funwind-tables", "-fstack-protector-strong", "-no-canonical-prefixes"])
+        compiler_flags.extend(["-g", "-DANDROID", "-ffunction-sections", "-funwind-tables", "-fstack-protector-strong",
+                               "-no-canonical-prefixes"])
         # --gcc-toolchain is set by CMAKE_<LANG>_COMPILER_EXTERNAL_TOOLCHAIN
         compiler_flags.append("--gcc-toolchain=%s" % toolchain_root_path)
 
         if self.settings.arch == "armv7":
             if self.options.neon:
                 compiler_flags.append("-mfpu=neon")
-            compiler_flags.extend(["-march=armv7-a", "-mfloat-abi=softfp", "-mfpu=vfpv3-d16", "-m%s" % self.options.arm_mode])
+            compiler_flags.extend(
+                ["-march=armv7-a", "-mfloat-abi=softfp", "-mfpu=vfpv3-d16", "-m%s" % self.options.arm_mode])
         elif self.settings.arch == "x86" and int(str(self.settings.os.api_level)) < 24:
             compiler_flags.append("-mstackrealign")
 
@@ -192,16 +206,16 @@ class AndroidNDKConan(ConanFile):
         # enable format string checks (default)
         compiler_flags.extend(["-Wformat", "-Werror=format-security"])
         # workaround for a bug in libsodium RDRAND detection...
-        compiler_flags.append("-Werror=implicit-function-declaration")
+        # compiler_flags.append("-Werror=implicit-function-declaration")
 
         # do not re-export libgcc symbols in every binary
-        linker_flags = ["-Wl,--exclude-libs,libgcc.a", "-Wl,--exclude-libs,libatomic.a", "--target=%s" % target]
-        linker_flags.append("--gcc-toolchain=%s" % toolchain_root_path)
+        linker_flags = ["-Wl,--exclude-libs,libgcc.a", "-Wl,--exclude-libs,libatomic.a",
+                        "--target=%s" % target, "--gcc-toolchain=%s" % toolchain_root_path,
+                        "-L%s" % posixpath.join(stl_path, "libs", self.android_abi)]
         # do not use system libstdc++
         # different sysroots for linking/compiling
         linker_flags.extend(["-nostdlib++", "--sysroot=%s" % platform_path])
         # set C++ library search path
-        linker_flags.append("-L%s" % posixpath.join(stl_path, "libs", self.android_abi))
         # link default libraries
         if self.options.libcxx == "static":
             linker_flags.extend(["-lc++_static", "-lc++abi"])
@@ -213,7 +227,8 @@ class AndroidNDKConan(ConanFile):
                 linker_flags.append("-lunwind")
         linker_flags.extend(["-latomic", "-lm"])
         if int(str(self.settings.os.api_level)) < 21:
-            compiler_flags.append("-isystem%s" % posixpath.join(self.posix_package_folder, "sources", "android", "support", "include"))
+            compiler_flags.append(
+                "-isystem%s" % posixpath.join(self.posix_package_folder, "sources", "android", "support", "include"))
             linker_flags.append("-landroid_support")
 
         # do not disable relro (default)
@@ -225,7 +240,8 @@ class AndroidNDKConan(ConanFile):
         linker_flags.append("-Qunused-arguments")
 
         # generic flags
-        linker_flags.extend(["-Wl,--build-id", "-Wl,--warn-shared-textrel", "-Wl,--fatal-warnings", "-Wl,--no-undefined"])
+        linker_flags.extend(
+            ["-Wl,--build-id", "-Wl,--warn-shared-textrel", "-Wl,--fatal-warnings", "-Wl,--no-undefined"])
         if self.settings.arch == "armv7":
             linker_flags.extend(["-Wl,--exclude-libs,libunwind.a", "-Wl,--fix-cortex-a8"])
         # specific flags for executables
@@ -243,7 +259,7 @@ class AndroidNDKConan(ConanFile):
         self.cpp_info.sharedlinkflags = linker_flags
         self.cpp_info.exelinkflags = exe_linker_flags
 
-        if self.settings.os_build == "Windows":
+        if platform.system() == "Windows":
             suffix = ".exe"
         else:
             suffix = ""
@@ -271,6 +287,10 @@ class AndroidNDKConan(ConanFile):
         self.env_info.CONAN_ANDROID_ABI = str(self.android_abi)
         self.env_info.CONAN_ANDROID_NATIVE_API_LEVEL = str(self.settings.os.api_level)
         self.env_info.CONAN_CMAKE_TOOLCHAIN_FILE = posixpath.join(self.posix_package_folder, "android-toolchain.cmake")
+        self.env_info.CONAN_CMAKE_FIND_ROOT_PATH = sysroot_path
+        self.env_info.CONAN_CMAKE_GENERATOR = self.deps_env_info['ninja_installer'].CONAN_CMAKE_GENERATOR
+        self.env_info.CONAN_MAKE_PROGRAM = "ninja.exe" if platform.system() == "Windows" else "ninja"
+        self.env_info.PATH.extend(self.deps_env_info['ninja_installer'].PATH)
 
     def package_id(self):
         self.info.settings.arch = "ANY"
