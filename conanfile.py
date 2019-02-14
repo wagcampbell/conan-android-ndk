@@ -1,6 +1,6 @@
 import os
-import posixpath
 import platform
+import posixpath
 
 from conans import ConanFile, tools
 
@@ -21,15 +21,15 @@ TRIPLE_ABIS = {"x86": "i686",
 
 
 # noinspection PyUnresolvedReferences
-class AndroidNDKConan(ConanFile):
+class AndroidToolchain(ConanFile):
     name = "android-ndk"
     version = "r19"
     license = "APACHE2"
     description = "Android NDK"
     url = "https://github.com/MX-Dev/conan-android-ndk"
     settings = "os", "arch", "compiler", "build_type"
-    options = {"libcxx": ["static", "shared"], "arm_mode": ["thumb", "arm"], "neon": [True, False]}
-    default_options = "libcxx=shared", "arm_mode=arm", "neon=True"
+    options = {"libcxx": ["static", "shared"], "arm_mode": ["thumb", "arm"], "neon": [True, False], "ndk_path": "ANY"}
+    default_options = "libcxx=shared", "arm_mode=arm", "neon=True", "ndk_path=False"
     requires = 'ninja_installer/1.8.2@bincrafters/stable'
     exports_sources = "android-toolchain.cmake"
     short_paths = True
@@ -45,7 +45,7 @@ class AndroidNDKConan(ConanFile):
 
     @property
     def posix_package_folder(self):
-        return posixpath.join(*self.package_folder.split('\\'))
+        return posixpath.join(*str(self.package_folder).split('\\'))
 
     @property
     def host(self):
@@ -123,6 +123,22 @@ class AndroidNDKConan(ConanFile):
             raise Exception("Arch %s is not supported" % self.settings.arch)
 
     def build(self):
+        if self.options.ndk_path:
+            if os.path.exists(str(self.options.ndk_path)):
+                return
+
+        env_path = os.getenv("ANDROID_NDK")
+        if env_path:
+            if os.path.exists(env_path):
+                self.options.ndk_path = env_path
+                return
+
+        env_path = os.getenv("ANDROID_NDK_HOME")
+        if env_path:
+            if os.path.exists(env_path):
+                self.options.ndk_path = env_path
+                return
+
         urls = {"Windows_AMD64": [
             "https://dl.google.com/android/repository/android-ndk-%s-windows-x86_64.zip" % self.version,
             "37906e8e79a9dddf6805325f706a072055e4136c"],
@@ -145,35 +161,33 @@ class AndroidNDKConan(ConanFile):
         os.unlink("ndk.zip")
 
     def package(self):
-        # # some STL headers in experimental/ simply contain an #error
-        # # This can cause invalid feature detection (via has_include or similar,
-        # # e.g. Boost.Asio tries to use experimental/string_view). Therefore, do not copy those files
-        # files_to_exclude = ["any", "chrono", "numeric", "optional", "ratio", "string_view", "system_error", "tuple"]
-        # exclude_list = ["*/experimental/%s" % f for f in files_to_exclude]
-
-        self.copy("*", dst="", src=self.zip_folder, keep_path=True, symlinks=True)
+        if not self.options.ndk_path:
+            files_to_exclude = ["any", "chrono", "numeric", "optional", "ratio", "string_view", "system_error", "tuple"]
+            exclude_list = ["*/experimental/%s" % f for f in files_to_exclude]
+            self.copy("*", dst="", src=self.zip_folder, keep_path=True, symlinks=True, excludes=exclude_list)
+            self.options.ndk_path = posixpath.join(self.package_folder, self.zip_folder)
         self.copy("android-toolchain.cmake")
 
     def package_info(self):
         android_platform = "android-%s" % self.settings.os.api_level
-        platform_path = posixpath.join(self.posix_package_folder, "platforms", android_platform,
-                                       "arch-%s" % self.sysroot_abi)
-        llvm_toolchain_root = posixpath.join(self.posix_package_folder, "toolchains", "llvm", "prebuilt", self.host)
+        ndk_root = posixpath.join(*str(self.options.ndk_path).split('\\'))
+        platform_path = posixpath.join(ndk_root, "platforms", android_platform, "arch-%s" % self.sysroot_abi)
         # This cannot be considered to be the "real" sysroot, since arch-specific files are in a subfolder
-        sysroot_path = posixpath.join(llvm_toolchain_root, "sysroot")
-        sysroot_include = posixpath.join(sysroot_path, "usr", "include")
-        sysroot_lib = posixpath.join(sysroot_path, "usr", "lib", self.header_triple)
-        sysroot_include_stl = posixpath.join(sysroot_path, "c++", "v1")
-        sysroot_include_arch = posixpath.join(sysroot_include, self.header_triple)
+        sysroot_path = posixpath.join(ndk_root, "sysroot")
+        stl_path = posixpath.join(ndk_root, "sources", "cxx-stl", "llvm-libc++")
+        stl_abi_path = posixpath.join(ndk_root, "sources", "cxx-stl", "llvm-libc++abi")
+        toolchain_root_path = posixpath.join(ndk_root, "toolchains", "%s-4.9" % self.toolchain_triple,
+                                             "prebuilt", self.host)
 
-        llvm_toolchain_prefix = posixpath.join(llvm_toolchain_root, "bin")
-        arch_bin = posixpath.join(llvm_toolchain_root, self.toolchain_triple)
+        llvm_toolchain_prefix = posixpath.join(ndk_root, "toolchains", "llvm", "prebuilt", self.host,
+                                               "bin")
+        toolchain_prefix = posixpath.join(toolchain_root_path, "bin", "%s-" % self.toolchain_name)
+
         # All those flags are taken from the NDK's android.toolchain.cmake file.
         # Set C library headers at the end of search path, otherwise #include_next will fail in C++ STL
-        compiler_flags = ["-isystem%s" % sysroot_include,
-                          "-isystem%s" % sysroot_include_stl,
-                          "-isystem%s" % sysroot_include_arch]
-
+        compiler_flags = ["-isystem %s" % posixpath.join(stl_abi_path, "include"),
+                          "-isystem %s" % posixpath.join(stl_path, "include"),
+                          "-isystem %s" % posixpath.join(sysroot_path, "usr", "include", self.header_triple)]
         # Find asm files
         target = self.llvm_triple
         compiler_flags.append("--target=%s" % target)
@@ -181,7 +195,7 @@ class AndroidNDKConan(ConanFile):
         compiler_flags.extend(["-g", "-DANDROID", "-ffunction-sections", "-funwind-tables", "-fstack-protector-strong",
                                "-no-canonical-prefixes"])
         # --gcc-toolchain is set by CMAKE_<LANG>_COMPILER_EXTERNAL_TOOLCHAIN
-        compiler_flags.append("--gcc-toolchain=%s" % llvm_toolchain_root)
+        compiler_flags.append("--gcc-toolchain=%s" % toolchain_root_path)
 
         if self.settings.arch == "armv7":
             if self.options.neon:
@@ -210,8 +224,8 @@ class AndroidNDKConan(ConanFile):
 
         # do not re-export libgcc symbols in every binary
         linker_flags = ["-Wl,--exclude-libs,libgcc.a", "-Wl,--exclude-libs,libatomic.a",
-                        "--target=%s" % target, "--gcc-toolchain=%s" % llvm_toolchain_root,
-                        "-L%s" % sysroot_lib]
+                        "--target=%s" % target, "--gcc-toolchain=%s" % toolchain_root_path,
+                        "-L%s" % posixpath.join(stl_path, "libs", self.android_abi)]
         # do not use system libstdc++
         # different sysroots for linking/compiling
         linker_flags.extend(["-nostdlib++", "--sysroot=%s" % platform_path])
@@ -223,13 +237,12 @@ class AndroidNDKConan(ConanFile):
                 linker_flags.extend(["-lunwind", "-ldl"])
         else:
             linker_flags.append("-lc++_shared")
-            compiler_flags.append('-stdlib=libc++')
             if self.settings.arch == "armv7":
                 linker_flags.append("-lunwind")
         linker_flags.extend(["-latomic", "-lm"])
         if int(str(self.settings.os.api_level)) < 21:
             compiler_flags.append(
-                "-isystem%s" % posixpath.join(self.posix_package_folder, "sources", "android", "support", "include"))
+                "-isystem%s" % posixpath.join(ndk_root, "sources", "android", "support", "include"))
             linker_flags.append("-landroid_support")
 
         # do not disable relro (default)
@@ -264,23 +277,24 @@ class AndroidNDKConan(ConanFile):
             suffix = ".exe"
         else:
             suffix = ""
-        clang = "clang%s" % suffix
-        clangxx = "clang++%s" % suffix
-        self.env_info.PATH.extend([llvm_toolchain_prefix, arch_bin])
+        clang = "%s/clang%s" % (llvm_toolchain_prefix, suffix)
+        clangxx = "%s/clang++%s" % (llvm_toolchain_prefix, suffix)
+        self.env_info.PATH.append(llvm_toolchain_prefix)
         self.env_info.CC = clang
         self.env_info.CXX = clangxx
         self.env_info.CPP = "%s -E" % clangxx
-        self.env_info.AS = clang
-        self.env_info.AR = posixpath.join(arch_bin, "ar%s" % suffix)
-        self.env_info.RANLIB = posixpath.join(arch_bin, "ranlib%s" % suffix)
-        self.env_info.STRIP = posixpath.join(arch_bin, "strip%s" % suffix)
-
+        self.env_info.CCAS = clang
         self.env_info.CFLAGS = " ".join(self.cpp_info.cflags)
         self.env_info.CPPFLAGS = " ".join(self.cpp_info.cflags)
         self.env_info.CXXFLAGS = " ".join(self.cpp_info.cppflags)
         self.env_info.ASFLAGS = " ".join(self.cpp_info.cflags)
         # There is no env var for executable linker flags...
         self.env_info.LDFLAGS = " ".join(self.cpp_info.sharedlinkflags)
+        self.env_info.LD = clang
+        self.env_info.AR = "%s/%s-ar%s" % (llvm_toolchain_prefix, self.header_triple, suffix)
+        self.env_info.RANLIB = "%s/%s-ranlib%s" % (llvm_toolchain_prefix, self.header_triple, suffix)
+        self.env_info.NM = "%s/%s-nm%s" % (llvm_toolchain_prefix, self.header_triple, suffix)
+        self.env_info.STRIP = "%s/%s-strip%s" % (llvm_toolchain_prefix, self.header_triple, suffix)
         # Provide a CMake Toolchain file, the two first flags are used inside android-toolchain.cmake
         if self.settings.arch == "armv7":
             self.env_info.CONAN_ANDROID_ARM_MODE = str(self.options.arm_mode)
@@ -288,12 +302,12 @@ class AndroidNDKConan(ConanFile):
                 self.env_info.CONAN_ANDROID_ARM_NEON = "TRUE"
         self.env_info.CONAN_ANDROID_STL = "c++_%s" % self.options.libcxx
         self.env_info.CONAN_ANDROID_ABI = str(self.android_abi)
+        self.env_info.CONAN_ANDROID_NDK = ndk_root
         self.env_info.CONAN_ANDROID_NATIVE_API_LEVEL = str(self.settings.os.api_level)
         self.env_info.CONAN_CMAKE_TOOLCHAIN_FILE = posixpath.join(self.posix_package_folder, "android-toolchain.cmake")
         self.env_info.CONAN_CMAKE_FIND_ROOT_PATH = sysroot_path
         self.env_info.CONAN_CMAKE_GENERATOR = self.deps_env_info['ninja_installer'].CONAN_CMAKE_GENERATOR
         self.env_info.CONAN_MAKE_PROGRAM = "ninja.exe" if platform.system() == "Windows" else "ninja"
-
         self.env_info.PATH.extend(self.deps_env_info['ninja_installer'].PATH)
 
     def package_id(self):
