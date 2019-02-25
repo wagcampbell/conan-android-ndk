@@ -1,5 +1,5 @@
 # Those variables will be used by the Android NDK CMake Toolchain later on
-set(ANDROID_NDK $ENV{CONAN_ANDROID_NDK})
+set(ANDROID_NDK_TOOLCHAIN $ENV{CONAN_ANDROID_NDK_TOOLCHAIN})
 set(ANDROID_ABI $ENV{CONAN_ANDROID_ABI})
 set(ANDROID_NATIVE_API_LEVEL $ENV{CONAN_ANDROID_NATIVE_API_LEVEL})
 set(ANDROID_ARM_MODE $ENV{CONAN_ANDROID_ARM_MODE})
@@ -19,4 +19,4 @@ set(CMAKE_FIND_ROOT_PATH_MODE_PACKAGE BOTH)
 set(CMAKE_FIND_ROOT_PATH_MODE_PROGRAM BOTH)
 
 # Finally, include the Android NDK CMake Toolchain
-include(${ANDROID_NDK}/build/cmake/android.toolchain.cmake)
+include(${ANDROID_NDK_TOOLCHAIN})
