@@ -168,8 +168,8 @@ class AndroidToolchain(ConanFile):
 
         # All those flags are taken from the NDK's android.toolchain.cmake file.
         # Set C library headers at the end of search path, otherwise #include_next will fail in C++ STL
-        compiler_flags = ["-isystem %s" % sysroot_include,
-                          "-isystem %s" % posixpath.join(sysroot_include, "c++", "v1"),
+        compiler_flags = ["-isystem %s" % posixpath.join(sysroot_include, "c++", "v1"),
+                          "-isystem %s" % sysroot_include,
                           "-isystem %s" % posixpath.join(sysroot_include, self.header_triple)]
         # Find asm files
         target = self.llvm_triple
