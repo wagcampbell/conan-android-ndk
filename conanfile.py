@@ -22,9 +22,10 @@ TRIPLE_ABIS = {"x86": "i686",
 
 # noinspection PyUnresolvedReferences
 class AndroidToolchain(ConanFile):
-    name = "android-ndk"
-    version = "r19b"
-    license = "APACHE2"
+    ndk_version = "r19b"
+    name = "android-ndk-%s" % ndk_version
+    version = "1.0"
+    license = "Apache-2.0"
     description = "Android NDK"
     url = "https://github.com/MX-Dev/conan-android-ndk"
     settings = "os", "arch", "compiler", "build_type"
@@ -32,12 +33,9 @@ class AndroidToolchain(ConanFile):
     default_options = "libcxx=shared", "arm_mode=arm", "neon=True"
     requires = 'ninja_installer/1.8.2@bincrafters/stable'
     exports_sources = "android-toolchain.cmake"
+    _source_subfolder = "source_subfolder"
     short_paths = True
     no_copy_source = True
-
-    @property
-    def zip_folder(self):
-        return "android-ndk-%s" % self.version
 
     def translate_arch(self, arch_map):
         arch_str = str(self.settings.arch)
@@ -123,38 +121,26 @@ class AndroidToolchain(ConanFile):
             raise Exception("Arch %s is not supported" % self.settings.arch)
 
     def source(self):
-        urls = {"Windows_AMD64": [
-            "https://dl.google.com/android/repository/android-ndk-%s-windows-x86_64.zip" % self.version,
-            "1aaedfa02ae3b2cb09ef1ca262ceaf2aca436f96"],
-            "Windows_x86": [
-                "https://dl.google.com/android/repository/android-ndk-%s-windows-x86.zip" % self.version,
-                "805e95ba96e5cc46060f5585594c6e2aef8c0304"],
-            "Macos_x86_64": [
-                "https://dl.google.com/android/repository/android-ndk-%s-darwin-x86_64.zip" % self.version,
-                "02a74f9b211f22bea223e91acc6f40853db818e4"],
-            "Linux_x86_64": [
-                "https://dl.google.com/android/repository/android-ndk-%s-linux-x86_64.zip" % self.version,
-                "16f62346ab47f7125a0e977dcc08f54881f8a3d7"]
-        }
+        archive_map = {"Windows_AMD64": "android-ndk-%s-windows-x86_64.zip" % self.ndk_version,
+                       "Windows_x86": "android-ndk-%s-windows-x86.zip" % self.ndk_version,
+                       "Macos_x86_64": "android-ndk-%s-darwin-x86_64.zip" % self.ndk_version,
+                       "Linux_x86_64": "android-ndk-%s-linux-x86_64.zip" % self.ndk_version}
 
-        url, sha1 = urls.get("%s_%s" % (platform.system(), platform.machine()))
-
-        tools.download(url, "ndk.zip")
-        tools.check_sha1("ndk.zip", sha1)
-        tools.unzip("ndk.zip", keep_permissions=True)
-        os.unlink("ndk.zip")
+        archive = archive_map.get("%s_%s" % (platform.system(), platform.machine()))
+        tools.get("https://dl.google.com/android/repository/%s" % archive)
+        os.rename(self.name, self._source_subfolder)
 
     def package(self):
         files_to_exclude = ["any", "chrono", "numeric", "optional", "ratio", "string_view", "system_error", "tuple"]
         exclude_list = ["*/experimental/%s" % f for f in files_to_exclude]
         llvm_path = posixpath.join("toolchains", "llvm", "prebuilt", self.host)
-        llvm_root = posixpath.join(self.zip_folder, llvm_path)
+        llvm_root = posixpath.join(self._source_subfolder, llvm_path)
         toolchain_path = posixpath.join("build", "cmake")
-        toolchain_root = posixpath.join(self.zip_folder, toolchain_path)
+        toolchain_root = posixpath.join(self._source_subfolder, toolchain_path)
         self.copy("*", dst=llvm_path, src=llvm_root, keep_path=True, symlinks=True, excludes=exclude_list)
         self.copy("*", dst=toolchain_path, src=toolchain_root, keep_path=True, symlinks=True)
         self.copy("android-toolchain.cmake")
-        self.copy("source.properties", dst="", src=posixpath.join(self.zip_folder), keep_path=True)
+        self.copy("source.properties", dst="", src=posixpath.join(self._source_subfolder), keep_path=True)
 
     def package_info(self):
         toolchain_root_path = posixpath.join(self.posix_package_folder, "toolchains", "llvm", "prebuilt", self.host)
@@ -207,8 +193,8 @@ class AndroidToolchain(ConanFile):
 
         # do not re-export libgcc symbols in every binary
         linker_flags = ["-Wl,--exclude-libs,libgcc.a", "-Wl,--exclude-libs,libatomic.a",
-                         "--target=%s" % target, "--gcc-toolchain=%s" % toolchain_root_path,
-                         "-L%s" % sysroot_api, "-L%s" % sysroot_lib]
+                        "--target=%s" % target, "--gcc-toolchain=%s" % toolchain_root_path,
+                        "-L%s" % sysroot_api, "-L%s" % sysroot_lib]
         # do not use system libstdc++
         # different sysroots for linking/compiling
         linker_flags.extend(["-nostdlib++", "--sysroot=%s" % sysroot_path])
@@ -288,9 +274,6 @@ class AndroidToolchain(ConanFile):
         self.env_info.CONAN_ANDROID_NATIVE_API_LEVEL = str(self.settings.os.api_level)
         self.env_info.CONAN_CMAKE_TOOLCHAIN_FILE = posixpath.join(self.posix_package_folder, "android-toolchain.cmake")
         self.env_info.CONAN_CMAKE_FIND_ROOT_PATH = sysroot_path
-        self.env_info.CONAN_CMAKE_GENERATOR = self.deps_env_info['ninja_installer'].CONAN_CMAKE_GENERATOR
-        self.env_info.CONAN_MAKE_PROGRAM = "ninja.exe" if platform.system() == "Windows" else "ninja"
-        self.env_info.PATH.extend(self.deps_env_info['ninja_installer'].PATH)
 
     def package_id(self):
         self.info.settings.arch = "ANY"
