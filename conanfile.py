@@ -24,7 +24,7 @@ TRIPLE_ABIS = {"x86": "i686",
 class AndroidToolchain(ConanFile):
     ndk_version = "r19b"
     name = "android-ndk-%s" % ndk_version
-    version = "1.0"
+    version = "1.1"
     license = "Apache-2.0"
     description = "Android NDK"
     url = "https://github.com/MX-Dev/conan-android-ndk"
@@ -127,13 +127,15 @@ class AndroidToolchain(ConanFile):
                        "Linux_x86_64": "android-ndk-%s-linux-x86_64.zip" % self.ndk_version}
 
         archive = archive_map.get("%s_%s" % (platform.system(), platform.machine()))
-        tools.get("https://dl.google.com/android/repository/%s" % archive)
+        tools.download("https://dl.google.com/android/repository/%s" % archive, "ndk.zip")
+        tools.unzip("ndk.zip", keep_permissions=True)
+        os.unlink("ndk.zip")
         os.rename(self.name, self._source_subfolder)
 
     def package(self):
         files_to_exclude = ["any", "chrono", "numeric", "optional", "ratio", "string_view", "system_error", "tuple"]
         exclude_list = ["*/experimental/%s" % f for f in files_to_exclude]
-        llvm_path = posixpath.join("toolchains", "llvm", "prebuilt", self.host)
+        llvm_path = posixpath.join("toolchains")
         llvm_root = posixpath.join(self._source_subfolder, llvm_path)
         toolchain_path = posixpath.join("build", "cmake")
         toolchain_root = posixpath.join(self._source_subfolder, toolchain_path)
@@ -143,6 +145,7 @@ class AndroidToolchain(ConanFile):
         self.copy("source.properties", dst="", src=posixpath.join(self._source_subfolder), keep_path=True)
 
     def package_info(self):
+        binutils = posixpath.join(self.posix_package_folder, "toolchains", "%s-4.9" % self.toolchain_triple, "prebuilt", self.host)
         toolchain_root_path = posixpath.join(self.posix_package_folder, "toolchains", "llvm", "prebuilt", self.host)
         sysroot_path = posixpath.join(toolchain_root_path, "sysroot")
         sysroot_usr = posixpath.join(sysroot_path, "usr")
@@ -164,7 +167,7 @@ class AndroidToolchain(ConanFile):
         compiler_flags.extend(["-g", "-DANDROID", "-ffunction-sections", "-funwind-tables", "-fstack-protector-strong",
                                "-no-canonical-prefixes"])
         # --gcc-toolchain is set by CMAKE_<LANG>_COMPILER_EXTERNAL_TOOLCHAIN
-        compiler_flags.append("--gcc-toolchain=%s" % toolchain_root_path)
+        compiler_flags.append("--gcc-toolchain=%s" % binutils)
 
         if self.settings.arch == "armv7":
             if self.options.neon:
@@ -193,7 +196,7 @@ class AndroidToolchain(ConanFile):
 
         # do not re-export libgcc symbols in every binary
         linker_flags = ["-Wl,--exclude-libs,libgcc.a", "-Wl,--exclude-libs,libatomic.a",
-                        "--target=%s" % target, "--gcc-toolchain=%s" % toolchain_root_path,
+                        "--target=%s" % target, "--gcc-toolchain=%s" % binutils,
                         "-L%s" % sysroot_api, "-L%s" % sysroot_lib]
         # do not use system libstdc++
         # different sysroots for linking/compiling
@@ -224,7 +227,7 @@ class AndroidToolchain(ConanFile):
         linker_flags.extend(
             ["-Wl,--build-id", "-Wl,--warn-shared-textrel", "-Wl,--fatal-warnings", "-Wl,--no-undefined"])
         if self.settings.arch == "armv7":
-            linker_flags.extend(["-Wl,--exclude-libs,libunwind.a", "-Wl,--fix-cortex-a8"])
+            linker_flags.extend(["-Wl,--exclude-libs,libunwind.a"])
         # specific flags for executables
         pie_flags = ["-pie"]
         if self.settings.arch in ["x86", "x86_64"]:
@@ -235,15 +238,18 @@ class AndroidToolchain(ConanFile):
         exe_linker_flags.extend(["-Wl,--gc-sections", "-Wl,-z,nocopyreloc"])
         exe_linker_flags.extend(pie_flags)
 
-        self.cpp_info.cflags = compiler_flags
-        self.cpp_info.cppflags = compiler_flags
-        self.cpp_info.sharedlinkflags = linker_flags
-        self.cpp_info.exelinkflags = exe_linker_flags
-
         if platform.system() == "Windows":
             suffix = ".exe"
         else:
             suffix = ""
+
+        linker = "%s/ld.lld%s" % (llvm_toolchain_prefix, suffix)
+        linker_flags.append("-fuse-ld=%s" % linker)
+
+        self.cpp_info.cflags = compiler_flags
+        self.cpp_info.cppflags = compiler_flags
+        self.cpp_info.sharedlinkflags = linker_flags
+        self.cpp_info.exelinkflags = exe_linker_flags
         clang = "%s/clang%s" % (llvm_toolchain_prefix, suffix)
         clangxx = "%s/clang++%s" % (llvm_toolchain_prefix, suffix)
         self.env_info.PATH.append(llvm_toolchain_prefix)
