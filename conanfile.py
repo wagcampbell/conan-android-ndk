@@ -19,12 +19,17 @@ TRIPLE_ABIS = {"x86": "i686",
                "armv7": "arm",
                "armv8": "aarch64"}
 
+TOOL_ABIS = {"x86": "i686",
+             "x86_64": "x86_64",
+             "armv7": "armv7a",
+             "armv8": "aarch64"}
+
 
 # noinspection PyUnresolvedReferences
 class AndroidToolchain(ConanFile):
-    ndk_version = "r19b"
+    ndk_version = "r19c"
     name = "android-ndk-%s" % ndk_version
-    version = "1.1"
+    version = "0.1"
     license = "Apache-2.0"
     description = "Android NDK"
     url = "https://github.com/MX-Dev/conan-android-ndk"
@@ -82,6 +87,15 @@ class AndroidToolchain(ConanFile):
         return "%s-linux-%s" % (arch, suffix)
 
     @property
+    def tool_triple(self):
+        arch = self.translate_arch(TOOL_ABIS)
+        if self.settings.arch == "armv7":
+            suffix = "androideabi"
+        else:
+            suffix = "android"
+        return "%s-linux-%s" % (arch, suffix)
+
+    @property
     def toolchain_triple(self):
         if self.settings.arch in ["x86", "x86_64"]:
             return self.android_abi
@@ -98,14 +112,8 @@ class AndroidToolchain(ConanFile):
             del self.options.neon
 
         api_level = int(str(self.settings.os.api_level))
-        # The NDK's CMake Toolchain file automatically raise the API level to 16
-        # It also raises the API level to 21 on 64-bit platform
-        # But this does not work well with Conan settings and package IDs...
-        # Hence the exceptions
-        if api_level < 16:
-            raise Exception("Minimum API level supported is 16")
-        if api_level < 21 and self.settings.arch in ["x86_64", "armv8"]:
-            raise Exception("64-bit platforms require API level 21+")
+        if api_level < 21:
+            raise Exception("Require API level 21+")
         if self.settings.compiler != "clang":
             raise Exception("clang is the only supported compiler")
         if self.settings.compiler.version != "8":
@@ -127,15 +135,13 @@ class AndroidToolchain(ConanFile):
                        "Linux_x86_64": "android-ndk-%s-linux-x86_64.zip" % self.ndk_version}
 
         archive = archive_map.get("%s_%s" % (platform.system(), platform.machine()))
-        tools.download("https://dl.google.com/android/repository/%s" % archive, "ndk.zip")
-        tools.unzip("ndk.zip", keep_permissions=True)
-        os.unlink("ndk.zip")
+        tools.get("https://dl.google.com/android/repository/%s" % archive)
         os.rename(self.name, self._source_subfolder)
 
     def package(self):
         files_to_exclude = ["any", "chrono", "numeric", "optional", "ratio", "string_view", "system_error", "tuple"]
         exclude_list = ["*/experimental/%s" % f for f in files_to_exclude]
-        llvm_path = posixpath.join("toolchains")
+        llvm_path = posixpath.join("toolchains", "llvm", "prebuilt", self.host)
         llvm_root = posixpath.join(self._source_subfolder, llvm_path)
         toolchain_path = posixpath.join("build", "cmake")
         toolchain_root = posixpath.join(self._source_subfolder, toolchain_path)
@@ -145,7 +151,6 @@ class AndroidToolchain(ConanFile):
         self.copy("source.properties", dst="", src=posixpath.join(self._source_subfolder), keep_path=True)
 
     def package_info(self):
-        binutils = posixpath.join(self.posix_package_folder, "toolchains", "%s-4.9" % self.toolchain_triple, "prebuilt", self.host)
         toolchain_root_path = posixpath.join(self.posix_package_folder, "toolchains", "llvm", "prebuilt", self.host)
         sysroot_path = posixpath.join(toolchain_root_path, "sysroot")
         sysroot_usr = posixpath.join(sysroot_path, "usr")
@@ -166,8 +171,8 @@ class AndroidToolchain(ConanFile):
         compiler_flags.append("--sysroot=%s" % sysroot_path)
         compiler_flags.extend(["-g", "-DANDROID", "-ffunction-sections", "-funwind-tables", "-fstack-protector-strong",
                                "-no-canonical-prefixes"])
-        # --gcc-toolchain is set by CMAKE_<LANG>_COMPILER_EXTERNAL_TOOLCHAIN
-        compiler_flags.append("--gcc-toolchain=%s" % binutils)
+
+        compiler_flags.append("--gcc-toolchain=%s" % toolchain_root_path)
 
         if self.settings.arch == "armv7":
             if self.options.neon:
@@ -196,7 +201,7 @@ class AndroidToolchain(ConanFile):
 
         # do not re-export libgcc symbols in every binary
         linker_flags = ["-Wl,--exclude-libs,libgcc.a", "-Wl,--exclude-libs,libatomic.a",
-                        "--target=%s" % target, "--gcc-toolchain=%s" % binutils,
+                        "--target=%s" % target, "--gcc-toolchain=%s" % toolchain_root_path,
                         "-L%s" % sysroot_api, "-L%s" % sysroot_lib]
         # do not use system libstdc++
         # different sysroots for linking/compiling
@@ -244,14 +249,13 @@ class AndroidToolchain(ConanFile):
             suffix = ""
 
         linker = "%s/ld.lld%s" % (llvm_toolchain_prefix, suffix)
-        linker_flags.append("-fuse-ld=%s" % linker)
-
         self.cpp_info.cflags = compiler_flags
+        self.cpp_info.cflags.append("-fuse-ld=%s" % linker)
         self.cpp_info.cppflags = compiler_flags
         self.cpp_info.sharedlinkflags = linker_flags
         self.cpp_info.exelinkflags = exe_linker_flags
-        clang = "%s/clang%s" % (llvm_toolchain_prefix, suffix)
-        clangxx = "%s/clang++%s" % (llvm_toolchain_prefix, suffix)
+        clang = "%s/%s-clang" % (llvm_toolchain_prefix, self.tool_triple + str(self.settings.os.api_level))
+        clangxx = "%s/%s-clang++" % (llvm_toolchain_prefix, self.tool_triple + str(self.settings.os.api_level))
         self.env_info.PATH.append(llvm_toolchain_prefix)
         self.env_info.CC = clang
         self.env_info.CXX = clangxx
