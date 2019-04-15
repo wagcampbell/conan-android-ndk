@@ -25,7 +25,7 @@ done
 echo REMOTE: $REMOTE
 echo PROFILE: $PROFILE
 
-#conan export . wagcampbell/testing
-#conan install android-ndk-r19c/0.1@wagcampbell/testing --build=android-ndk-r19c --profile=${PROFILE}
-#conan upload android-ndk-r19c/0.1@wagcampbell/testing --all -r=${REMOTE}
+conan export . wagcampbell/testing
+conan install android-ndk-r19c/0.1@wagcampbell/testing --build=android-ndk-r19c --profile=${PROFILE}
+conan upload android-ndk-r19c/0.1@wagcampbell/testing --all -r=${REMOTE}
 
