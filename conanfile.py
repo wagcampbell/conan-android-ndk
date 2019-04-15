@@ -135,7 +135,9 @@ class AndroidToolchain(ConanFile):
                        "Linux_x86_64": "android-ndk-%s-linux-x86_64.zip" % self.ndk_version}
 
         archive = archive_map.get("%s_%s" % (platform.system(), platform.machine()))
-        tools.get("https://dl.google.com/android/repository/%s" % archive)
+        ## Use local host when testing (to avoid re-downloading)
+        tools.get("http://127.0.0.1:8000/%s" % archive, keep_permissions=True)
+        ##tools.get("https://dl.google.com/android/repository/%s" % archive, keep_permissions=True)
         os.rename(self.name, self._source_subfolder)
 
     def package(self):
