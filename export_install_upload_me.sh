@@ -11,7 +11,7 @@ while [ "$1" != "" ]; do
             REMOTE=$VALUE
             ;;
         -pr | --profile)
-            REMOTE=$VALUE
+            PROFILE=$VALUE
             ;;
         *)
             echo "ERROR: unknown parameter \"$PARAM\""
@@ -22,7 +22,10 @@ while [ "$1" != "" ]; do
     shift
 done
 
-conan export . wagcampbell/testing
-conan install android-ndk-r19c/0.1@wagcampbell/testing --build=android-ndk-r19c --profile=${PROFILE}
-conan upload android-ndk-r19c/0.1@wagcampbell/testing --all -r=${REMOTE}
+echo REMOTE: $REMOTE
+echo PROFILE: $PROFILE
+
+#conan export . wagcampbell/testing
+#conan install android-ndk-r19c/0.1@wagcampbell/testing --build=android-ndk-r19c --profile=${PROFILE}
+#conan upload android-ndk-r19c/0.1@wagcampbell/testing --all -r=${REMOTE}
 
