@@ -143,14 +143,8 @@ class AndroidToolchain(ConanFile):
     def package(self):
         files_to_exclude = ["any", "chrono", "numeric", "optional", "ratio", "string_view", "system_error", "tuple"]
         exclude_list = ["*/experimental/%s" % f for f in files_to_exclude]
-        llvm_path = posixpath.join("toolchains", "llvm", "prebuilt", self.host)
-        llvm_root = posixpath.join(self._source_subfolder, llvm_path)
-        toolchain_path = posixpath.join("build", "cmake")
-        toolchain_root = posixpath.join(self._source_subfolder, toolchain_path)
-        self.copy("*", dst=llvm_path, src=llvm_root, keep_path=True, symlinks=True, excludes=exclude_list)
-        self.copy("*", dst=toolchain_path, src=toolchain_root, keep_path=True, symlinks=True)
+        self.copy("*", dst="", src=posixpath.join(self._source_subfolder), keep_path=True, symlinks=True, excludes=exclude_list)
         self.copy("android-toolchain.cmake")
-        self.copy("source.properties", dst="", src=posixpath.join(self._source_subfolder), keep_path=True)
 
     def package_info(self):
         toolchain_root_path = posixpath.join(self.posix_package_folder, "toolchains", "llvm", "prebuilt", self.host)
