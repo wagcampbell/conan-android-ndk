@@ -32,7 +32,7 @@ class AndroidToolchain(ConanFile):
     version = "0.1"
     license = "Apache-2.0"
     description = "Android NDK"
-    url = "https://github.com/MX-Dev/conan-android-ndk"
+    url = "https://github.com/wagcampbell/conan-android-ndk"
     settings = "os", "arch", "compiler", "build_type"
     options = {"libcxx": ["static", "shared"], "arm_mode": ["thumb", "arm"], "neon": [True, False]}
     default_options = "libcxx=shared", "arm_mode=arm", "neon=True"
